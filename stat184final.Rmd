@@ -1,0 +1,112 @@
+---
+title: "Final Project"
+output: html_document
+date: "2023-12-06"
+---
+RESEARCH QUESTION: How is drug use related to crime rate in the United States, and which age group uses the most drugs?
+Difficulty encountered: I encountered difficulty finding relevant data and cleaning the data so that the two sets could be properly joined. I overcame this error by using statista and kaggle, along with packages existing in R.
+
+```{r}
+# installing crime data package
+# install.packages("crimedata")
+```
+```{r}
+# getting crime data for the years 2010-2015 which are the years i am going to analyze
+library(crimedata)
+options(repos = c(CRAN = "https://cloud.r-project.org"))
+crime_data <- get_crime_data(years = 2010:2015)
+# View(crime_data)
+
+```
+```{r}
+library(dplyr)
+# created a user defined function called extract_year to extract the year from the date_single column using regex
+extract_year <- function(date_column) {
+  # Apply the regex pattern to the entire column
+  year_only <- sub("^([0-9]{4}).*", "\\1", date_column)
+  
+  return(year_only)
+}
+# using my function on the crime_data
+crime_data$date_single <- extract_year(crime_data$date_single)
+# grouping this data by offense_group and date_single
+crime_data_grouped <- crime_data %>%
+  group_by(offense_group, date_single) %>%
+  summarize(count = n())
+# removing NA values
+crime_data_grouped<- crime_data_grouped %>%
+  filter(!is.na(offense_group) & !is.na(date_single) & !is.na(count))
+
+```
+```{r}
+library(readxl)
+# importing drug use data
+DrugUse <- readr::read_csv("~/Downloads/prevalence-of-drug-use-disorders-by-age.csv")
+DrugUse <- DrugUse %>% rename(Country = Entity, Current_Use_AgeStandard =`Current number of cases of drug use disorders per 100 people, in both sexes aged age-standardized`, Current_Use_AllAge = `Current number of cases of drug use disorders per 100 people, in both sexes aged all ages`, Use_Over_70 = `Current number of cases of drug use disorders per 100 people, in both sexes aged 70+ years`, Use_15_to_49 = `Current number of cases of drug use disorders per 100 people, in both sexes aged 15-49 years`, Use_30_to_34 = `Current number of cases of drug use disorders per 100 people, in both sexes aged 30 to 34`, Use_25_to_29 = `Current number of cases of drug use disorders per 100 people, in both sexes aged 25 to 29`, Use_20_to_24 = `Current number of cases of drug use disorders per 100 people, in both sexes aged 20 to 24`, Use_15_to_19 = `Current number of cases of drug use disorders per 100 people, in both sexes aged 15 to 19`, Use_10_to_14 = `Current number of cases of drug use disorders per 100 people, in both sexes aged 10 to 14`, Use_5_to_14 = `Current number of cases of drug use disorders per 100 people, in both sexes aged 5-14 years`)
+# View(DrugUse)
+# filter so I just see US drug use stats
+USdrugs <- DrugUse %>%
+  filter(Country == "United States" & Year >= 2010 & Year <= 2015)
+# rename date_single to Year
+crime_data_grouped <- crime_data_grouped %>% rename(Year = date_single)
+# make the column Year into numeric
+crime_data_grouped <- crime_data_grouped %>%
+  mutate(Year = as.numeric(Year))
+# joining data by shared column "Year"
+joined_data <- left_join(crime_data_grouped, USdrugs, by = "Year")
+# View(joined_data)
+```
+
+
+
+```{r}
+# trying to see the count of each crime per category
+library(ggplot2)
+crime_data_count <- crime_data %>%
+  group_by(offense_group)%>%
+  # transformation function
+  summarize(count = n())
+# selecting different types of crime I want to analyze
+selected_offense_groups <- c("burglary/breaking & entering", "motor vehicle theft", "robbery")
+
+selected_crime <- joined_data %>%
+  filter(offense_group %in% selected_offense_groups)
+ggplot(selected_crime, aes(x = Year, y = count, fill = offense_group)) +
+  geom_bar(stat = "identity", position = "stack") +
+  labs(title = "Count of Cases by Offense Group From 2010-2015",
+       x = "Year",
+       y = "Count")
+```
+As you can tell by this graph, burglary and robbery have notably decreased since 2012, while motor vehicle theft has mostly remained stagnant. 
+```{r}
+ggplot(selected_crime, aes(x = count, y = Current_Use_AgeStandard)) +
+  geom_point()  + geom_smooth(method = "lm", se = FALSE, color = "blue") +
+  facet_wrap(~ offense_group)
+ 
+```
+This is really interesting, because as current use age standard drug use decreases, crime apparently increases.  It is important to note that there are other socioeconomic variables that affect crime rate, however it is a fair initial assumption that higher drug use may correlate to higher crime rates.
+```{r}
+# Now I want to see how drug use fluctuates by age
+crime_data_yearly <- crime_data %>%
+  group_by(date_single) %>%
+  summarize(count = n()) %>%
+  filter(date_single > 2009)
+```
+```{r}
+library(tidyr)
+crime_data_grouped_yearly <- crime_data_yearly %>% rename(Year = date_single)
+# make the column Year into numeric
+crime_data_grouped_yearly <- crime_data_grouped_yearly %>%
+  mutate(Year = as.numeric(Year))
+# joining data by shared column "Year"
+joined_data_yearly <- left_join(crime_data_grouped_yearly, USdrugs, by = "Year")
+drug_plot <- joined_data_yearly %>%
+  select(Year, Use_Over_70, Use_15_to_49, Use_30_to_34, Use_25_to_29, Use_20_to_24, Use_15_to_19, Use_10_to_14, Use_5_to_14) %>%
+  gather(key = "AgeGroup", value = "DrugUse", -Year) %>%
+  ggplot(aes(x = Year, y = DrugUse, fill = AgeGroup)) +
+  geom_bar(stat = "identity", position = "dodge", width = 0.7) +
+  labs(title = "Drug Use Per Age Group Over Years", x = "Year", y = "Drug Use", fill = "Age Group") +
+  theme(legend.position = "top")
+drug_plot
+```
+As you can see, age group 25 to 29 and age group 20 to 24 use drugs at the highest rate.  In a separate project, it could be interesting to analyze which age groups commit crimes at the highest rates.
